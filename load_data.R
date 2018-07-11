@@ -101,6 +101,16 @@ bureau_balance_df <- bureau_balance %>%
             MONTHS_BAD_STATUS = sum(as.integer(as.logical(as.numeric(STATUS))),na.rm=T)) %>% 
   mutate(EARLIEST_MONTHS_BALANCE = ifelse(EARLIEST_MONTHS_BALANCE == -Inf,NA,EARLIEST_MONTHS_BALANCE))
 
+bureau_balance_df <- bureau_balance %>% 
+  mutate(STATUS = ifelse(STATUS == "C",0,
+                         ifelse(STATUS == "X",NA,STATUS)),
+        period = ifelse(MONTHS_BALANCE >= -12,"MONTHS_BAD_STATUS_SHORT",
+                                ifelse(MONTHS_BALANCE >= -48,"MONTHS_BAD_STATUS_MID","MONTHS_BAD_STATUS_LONG"))) %>% 
+  group_by(SK_ID_BUREAU,period) %>% 
+  summarise(MONTHS_BAD_STATUS = sum(as.integer(as.logical(as.numeric(STATUS))),na.rm=T)) %>% 
+    spread(period,MONTHS_BAD_STATUS,fill = 0)
+
+
 # 77% of loans have been paid with no due
 bureau_balance_df %>% tabyl(EARLIEST_MONTHS_BALANCE)
 
@@ -169,6 +179,22 @@ bureau_summary_df <- bureau %>%
          EARLIEST_MONTHS_BALANCE_MIN_BUREAU = ifelse(EARLIEST_MONTHS_BALANCE_MIN_BUREAU == Inf,NA,EARLIEST_MONTHS_BALANCE_MIN_BUREAU))
 
 
+bureau_summary_df <- bureau %>% 
+  mutate(AMT_CREDIT_SUM_DEBT_GT_SUM = as.integer(AMT_CREDIT_SUM_DEBT > AMT_CREDIT_SUM),
+         AMT_CREDIT_SUM_LIMIT_GT_SUM= as.integer(AMT_CREDIT_SUM_LIMIT > AMT_CREDIT_SUM),
+         AMT_CREDIT_SUM_DEBT_LT_0 = as.integer(AMT_CREDIT_SUM_DEBT < 0),
+         CREDIT_DAY_OVERDUE_GT_0 = as.integer(CREDIT_DAY_OVERDUE > 0)) %>% 
+  left_join(bureau_balance_df) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise_if(is.numeric,
+               funs(N =n(), 
+                     MAX_BUREAU = max(.,na.rm = T),
+                     MIN_BUREAU = min(.,na.rm = T),
+                     SUM_BUREAU = sum(.,na.rm = T),
+                     MEAN_BUREAU = mean(.,na.rm=T))) %>% 
+  mutate_at(vars(ends_with("MAX_BUREAU")), funs(ifelse(. == -Inf,NA,.))) %>% 
+  mutate_at(vars(ends_with("MIN_BUREAU")), funs(ifelse(. == Inf,NA,.)))
+
 
 
 bureau_type_df <- bureau %>% 
@@ -198,27 +224,35 @@ pos_cash_balance %>% tabyl(NAME_CONTRACT_STATUS)
 
 pos_cash_balance_previous_df <- pos_cash_balance %>% 
   mutate(CONTRACT_COMPLETED = ifelse(NAME_CONTRACT_STATUS == "Completed",1L,0L)) %>% 
-  group_by(SK_ID_PREV,SK_ID_CURR) %>% 
+  mutate(period = ifelse(MONTHS_BALANCE >= -12,"SHORT",
+                         ifelse(MONTHS_BALANCE >= -48,"MID","LONG"))) %>% 
+  group_by(SK_ID_PREV,SK_ID_CURR,period) %>% 
 summarise(LAST_MONTHS_BALANCE = max(MONTHS_BALANCE, na.rm = T),
           CNT_INSTALMENT_MAX = max(CNT_INSTALMENT, na.rm = T),
           LAST_CNT_INSTALMENT_FUTURE = min(CNT_INSTALMENT_FUTURE, na.rm = T),
           SK_DPD_MAX = max(SK_DPD, na.rm = T),
           SK_DPD_DEF_MAX = max(SK_DPD_DEF, na.rm = T),
-          CONTRACT_COMPLETED = sum(CONTRACT_COMPLETED))
+          CONTRACT_COMPLETED = sum(CONTRACT_COMPLETED, na.rm = T)) %>% 
+  gather("variable","valor", -SK_ID_PREV,-SK_ID_CURR,-period) %>% 
+  unite("variable",variable,period,sep="_",remove = T) %>% 
+  spread(variable,valor,fill= 0)
 
 
 pos_cash_balance_df <- pos_cash_balance_previous_df %>% 
-  mutate(CONTRACT_IS_COMPLETED = ifelse(CONTRACT_COMPLETED == 1,"CONTRACT_COMPLETED","CONTRACT_UNCOMPLETED")) %>% 
-  select(-CONTRACT_COMPLETED) %>% 
+  ungroup() %>% 
+  select(-SK_ID_PREV) %>% 
+  mutate(CONTRACT_IS_COMPLETED = ifelse(CONTRACT_COMPLETED_SHORT == 1 | CONTRACT_COMPLETED_MID == 1 | CONTRACT_COMPLETED_LONG == 1,"CONTRACT_COMPLETED","CONTRACT_UNCOMPLETED")) %>% 
+  # select(-contains("CONTRACT_COMPLETED")) %>% 
   one_hot(CONTRACT_IS_COMPLETED) %>% 
   group_by(SK_ID_CURR) %>% 
-  summarise(NUMBER_PREVIOUS_CONTRACTS = n(),
-            NUMBER_PREVIOUS_CONTRACTS_COMPLETED = sum(CONTRACT_COMPLETED),
-            NUMBER_PREVIOUS_CONTRACTS_UNCOMPLETED = sum(CONTRACT_UNCOMPLETED),
-            CNT_INSTALMENT_PREVIOUS_CONTRACTS = sum(CNT_INSTALMENT_MAX, na.rm = T),
-            SK_DPD_PREVIOUS_CONTRACTS= sum(SK_DPD_MAX, na.rm = T),
-            SK_DPD_DEF_PREVIOUS_CONTRACTS= sum(SK_DPD_DEF_MAX, na.rm = T)
-            )
+  summarise_all(funs(sum(., na.rm=T),n()))
+  # summarise(NUMBER_PREVIOUS_CONTRACTS = n(),
+  #           NUMBER_PREVIOUS_CONTRACTS_COMPLETED = sum(CONTRACT_COMPLETED),
+  #           NUMBER_PREVIOUS_CONTRACTS_UNCOMPLETED = sum(CONTRACT_UNCOMPLETED),
+  #           CNT_INSTALMENT_PREVIOUS_CONTRACTS = sum(CNT_INSTALMENT_MAX, na.rm = T),
+  #           SK_DPD_PREVIOUS_CONTRACTS= sum(SK_DPD_MAX, na.rm = T),
+  #           SK_DPD_DEF_PREVIOUS_CONTRACTS= sum(SK_DPD_DEF_MAX, na.rm = T)
+  #           )
 
 # aplication_train %>% select(SK_ID_CURR,TARGET) %>% left_join(bureau) %>% 
 #   ggplot(aes(x=NUMBER_PREVIOUS_CONTRACTS,fill=TARGET,group=TARGET)) +
@@ -280,7 +314,7 @@ credit_card_balance_previous_df <- credit_card_balance %>%
             CNT_DRAWINGS_POS_CURRENT = mean(CNT_DRAWINGS_POS_CURRENT),
             SK_DPD = mean(SK_DPD),
             SK_DPD_DEF = mean(SK_DPD_DEF)) %>% 
- gather("variable","valor") %>% 
+ gather("variable","valor", -SK_ID_PREV,-SK_ID_CURR,-period) %>% 
   unite("variable",variable,period,sep="_",remove = T) %>% 
   spread(variable,valor)
  
@@ -288,24 +322,26 @@ credit_card_balance_previous_df <- credit_card_balance %>%
                
 credit_card_balance_df <- credit_card_balance_previous_df %>% 
   group_by(SK_ID_CURR) %>% 
-  summarise(AMT_BALANCE = sum(AMT_BALANCE),
-            AMT_CREDIT_LIMIT_ACTUAL = sum(AMT_CREDIT_LIMIT_ACTUAL),
-            AMT_DRAWINGS_ATM_CURRENT = sum(AMT_DRAWINGS_ATM_CURRENT),
-            AMT_DRAWINGS_CURRENT = sum(AMT_DRAWINGS_CURRENT),
-            AMT_DRAWINGS_OTHER_CURRENT = sum(AMT_DRAWINGS_OTHER_CURRENT),
-            AMT_DRAWINGS_POS_CURRENT = sum(AMT_DRAWINGS_POS_CURRENT),
-            AMT_INST_MIN_REGULARITY = sum(AMT_INST_MIN_REGULARITY),
-            AMT_PAYMENT_CURRENT = sum(AMT_PAYMENT_CURRENT),
-            AMT_PAYMENT_TOTAL_CURRENT = sum(AMT_PAYMENT_TOTAL_CURRENT),
-            AMT_RECEIVABLE_PRINCIPAL = sum(AMT_RECEIVABLE_PRINCIPAL),
-            AMT_RECIVABLE = sum(AMT_RECIVABLE),
-            AMT_TOTAL_RECEIVABLE = sum(AMT_TOTAL_RECEIVABLE),
-            CNT_DRAWINGS_ATM_CURRENT = sum(CNT_DRAWINGS_ATM_CURRENT),
-            CNT_DRAWINGS_CURRENT = sum(CNT_DRAWINGS_CURRENT),
-            CNT_DRAWINGS_OTHER_CURRENT = sum(CNT_DRAWINGS_OTHER_CURRENT),
-            CNT_DRAWINGS_POS_CURRENT = sum(CNT_DRAWINGS_POS_CURRENT),
-            SK_DPD = sum(SK_DPD),
-            SK_DPD_DEF = sum(SK_DPD_DEF))
+  select(-SK_ID_PREV) %>% 
+  summarise_all(sum, na.rm = T)
+  # summarise(AMT_BALANCE = sum(AMT_BALANCE),
+  #           AMT_CREDIT_LIMIT_ACTUAL = sum(AMT_CREDIT_LIMIT_ACTUAL),
+  #           AMT_DRAWINGS_ATM_CURRENT = sum(AMT_DRAWINGS_ATM_CURRENT),
+  #           AMT_DRAWINGS_CURRENT = sum(AMT_DRAWINGS_CURRENT),
+  #           AMT_DRAWINGS_OTHER_CURRENT = sum(AMT_DRAWINGS_OTHER_CURRENT),
+  #           AMT_DRAWINGS_POS_CURRENT = sum(AMT_DRAWINGS_POS_CURRENT),
+  #           AMT_INST_MIN_REGULARITY = sum(AMT_INST_MIN_REGULARITY),
+  #           AMT_PAYMENT_CURRENT = sum(AMT_PAYMENT_CURRENT),
+  #           AMT_PAYMENT_TOTAL_CURRENT = sum(AMT_PAYMENT_TOTAL_CURRENT),
+  #           AMT_RECEIVABLE_PRINCIPAL = sum(AMT_RECEIVABLE_PRINCIPAL),
+  #           AMT_RECIVABLE = sum(AMT_RECIVABLE),
+  #           AMT_TOTAL_RECEIVABLE = sum(AMT_TOTAL_RECEIVABLE),
+  #           CNT_DRAWINGS_ATM_CURRENT = sum(CNT_DRAWINGS_ATM_CURRENT),
+  #           CNT_DRAWINGS_CURRENT = sum(CNT_DRAWINGS_CURRENT),
+  #           CNT_DRAWINGS_OTHER_CURRENT = sum(CNT_DRAWINGS_OTHER_CURRENT),
+  #           CNT_DRAWINGS_POS_CURRENT = sum(CNT_DRAWINGS_POS_CURRENT),
+  #           SK_DPD = sum(SK_DPD),
+  #           SK_DPD_DEF = sum(SK_DPD_DEF))
     
   
 
@@ -388,6 +424,11 @@ aplication_df <- aplication %>%
 # 09 - Feature engineering -----------
 #_______________________________________
 
+
+aplication_df <- aplication_df %>% 
+  mutate_at(vars(contains("_MID"), contains("_SHORT"),contains("_LONG")),
+                            funs(as.integer(as.logical(.))))
+
 aplication_df <- aplication_df %>% 
   select(-contains("FLAG_DOCUMENT")) %>%
   mutate(EXT_SOURCES_MEAN = (EXT_SOURCE_1 + EXT_SOURCE_2 + EXT_SOURCE_3)/3,
@@ -395,6 +436,8 @@ aplication_df <- aplication_df %>%
          CREDIT_ANNUITY_RATIO = AMT_CREDIT_SUM / AMT_ANNUITY,
          CREDIT_GOODS_RATIO = AMT_CREDIT_SUM / AMT_GOODS_PRICE,
          DAYS_EMPLOYED_BIRTH_RATIO = DAYS_EMPLOYED /DAYS_BIRTH
+         # MAX_STATUS_BUREAU = as.integer(MAX_STATUS_BUREAU)
+         # MAX_STATUS_BAD_TIME = MAX_STATUS_BUREAU * (96 + EARLIEST_MONTHS_BALANCE_MAX_BUREAU)
          ) %>% 
   group_by(TARGET) %>% 
   # mutate_at(vars(starts_with("CREDIT_ACTIVE"),
@@ -423,3 +466,28 @@ aplication_train_df <- aplication_df %>%
 aplication_validation_df <- aplication_df %>% 
   filter(!is.na(TARGET)) %>% 
   setdiff(aplication_train_df)
+
+#UPSAMPLING TRAINING: 70/30:
+
+target_1 <- aplication_train_df %>% 
+  mutate(row_number = row_number()) %>% 
+  filter(TARGET == 1) %>% 
+  pull(row_number)
+
+factor_sampling_1 <- proportion_sampling(aplication_train_df,0.3)
+
+aplication_train_df <- aplication_train_df %>% 
+  filter(TARGET == 0) %>% 
+  bind_rows(
+    aplication_train_df %>% 
+      dplyr::slice(sample(target_1,round(length(target_1) * factor_sampling_1,0), replace = T))
+  )
+
+proportion_sampling <- function(df,x){
+  df_n <- df %>% group_by(TARGET) %>% summarise(n = n())
+  n_0 <- df_n %>% filter(TARGET == 0) %>% pull(n)
+  n_1 <- df_n %>% filter(TARGET == 1) %>% pull(n)
+  return(x*n_0 / (n_1 * (1-x)))
+}
+
+aplication_train_df %>% group_by(TARGET) %>% summarise(n = n())
