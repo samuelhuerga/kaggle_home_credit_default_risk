@@ -1,4 +1,6 @@
 library(fs)
+library(gridExtra)
+
 is_dummy <- function(x) {
   all(x %in% c(0,1))
 }
@@ -50,6 +52,8 @@ proportion_dummy(aplication_train_df,"FLAG_EMAIL")
 proportion_dummy(aplication_train_df,TARGET,FLAG_DOCUMENT_2)
 proportion_dummy(aplication_train_df,"TARGET","FLAG_DOCUMENT_2")
 proportion_dummy(aplication_train_df,"TARGET","FLAG_OWN_REALTY")
+proportion_dummy(aplication_train_df,"TARGET","MAX_STATUS_BAD_TIME")
+proportion_dummy(aplication_train_df,"TARGET","MAX_STATUS_BUREAU")
 
 var_target <- "TARGET"
 var <- "FLAG_DOCUMENT_2"
@@ -84,6 +88,7 @@ df %>%
         axis.title.x = element_blank(),
         axis.title.y = element_blank())
 }
+
 
 # One by one:
 continous_variable_plot <- function(df,var_target, var){
@@ -140,6 +145,9 @@ continous_variable_plot <- function(df,var_target, var){
 
 continous_variable_plot(aplication_train_df,"TARGET","AMT_ANNUITY")
 continous_variable_plot(aplication_train_df,"TARGET","AMT_CREDIT")
+discrete_variable_plot(aplication_train_df,"TARGET","MAX_STATUS_BAD_TIME")
+discrete_variable_plot(aplication_train_df,"TARGET","MAX_STATUS_BUREAU")
+discrete_variable_plot(aplication_train_df,"TARGET","MONTHS_BAD_STATUS_LONG_SUM_BUREAU")
 
 library(gridExtra)
 aplication_train_df %>% 

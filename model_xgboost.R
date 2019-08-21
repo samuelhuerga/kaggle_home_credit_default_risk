@@ -32,7 +32,7 @@ xgb.importance(cols, model=m_xgb) %>%
 
 xgb.importance(cols, model=m_xgb) %>% 
   mutate(rank = row_number()) %>% 
-  filter(Feature %>% str_detect("MONTHS"))
+  filter(Feature %>% str_detect("MONTHS_BAD_STATUS"))
 
 # data_frame(d=aplication_validation_df %>% pull(TARGET),m=predict(m_xgb, validation_matrix)) %>%
 #   ggplot(aes(d=d,m=m)) %>%
@@ -46,3 +46,5 @@ aplication_test_df %>%
   mutate(SK_ID_CURR = as.integer(SK_ID_CURR),
          TARGET = predict(m_xgb, test_matrix)) %>%
   write_csv(paste0("predictions/xgb_parcial_", round(m_xgb$best_score, 4), ".csv"))
+
+
